@@ -9,15 +9,7 @@ from torch import nn
 from torchvision.ops import SqueezeExcitation
 
 
-class AddNoise(nn.Module):
-    def __init__(self):
-        self.bias = nn.Parameter(
-            torch.rand(1),
-            requires_grad=True
-        )
-    
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        noise = torch.normal()
+
 
 
 def conv_kwargs(
@@ -34,7 +26,13 @@ def conv_kwargs(
         "kernel_size": kernel_size,
         "stride": stride,
         "padding": padding
-    } 
+    }
+
+
+class Swish(nn.Module):
+    def foward(self, x: torch.Tensor) -> torch.Tensor:
+        return x * torch.sigmoid(x)
+
 
 def conv_util(
     in_channels,
@@ -58,4 +56,59 @@ def conv_util(
         )
 
     if noise:
-        pass
+        layers.append(nn.Dropout(p=0.1))
+    
+    if bn:
+        layers.append(nn.BatchNorm2d(out_channels))
+    
+    layers.append(Swish())
+
+    return nn.Sequential(*layers)
+
+
+class Encoder2(nn.Module):
+    def __init__(
+        self,
+        shape: int,
+        dim: int = 128,
+    ) -> None:
+        tpm_shape = (1, shape, dim)
+        tmp = torch.ones(tpm_shape)
+        tmp = torch.split(tmp, tmp.shape[-2] // 16, -2)
+        tmp = torch.concat(tmp, 0)
+
+        kwargs = dict(strides=(1, 1), padding="valid")
+        self.g0 = conv_util(dim      , 256      , kernel_size=(1, 1), **kwargs)
+        self.g1 = conv_util(256      , 256 + 256, kernel_size=(1, 3), **kwargs)
+        self.g2 = conv_util(256 + 256, 512 + 128, kernel_size=(1, 3), **kwargs)
+        self.g3 = conv_util(512 + 128, 512 + 128, kernel_size=(1, 1), **kwargs)
+        self.g4 = conv_util(512 + 128, 512 + 128, kernel_size=(1, 3), **kwargs)
+        self.g5 = conv_util(512 + 256, 512 + 256, kernel_size=(1, 2), **kwargs)
+
+        self.g = nn.Conv2d(
+            in_channels=512 + 256, 
+            out_channels=64, 
+            kernel_size=(1, 1), 
+            strides=1,
+            name="cbottle")
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = torch.split(x, x.shape[-2] // 16, -2)
+        x = torch.concat(x, 1)
+
+        x = self.g0(x)
+        x = self.g1(x)
+        x = self.g2(x)
+        x = self.g3(x)
+        x = self.g4(x)
+        x = self.g5(x)
+        
+        x = self.g(x)
+        x = torch.tanh(x)
+        
+        x = torch.split(x, x.shape[1] // 16, 1)
+        x = torch.concat(x, -2)
+        x = torch.split(x, x.shape[-2] // 2, -2)
+        x = torch.concat(x, 1)
+
+        return x.float()
