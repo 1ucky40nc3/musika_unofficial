@@ -8,6 +8,7 @@ from torch import nn
 
 from torchvision.ops import SqueezeExcitation
 
+import einops
 
 
 
@@ -142,5 +143,44 @@ class Decoder2(nn.Module):
 
         x = torch.split(x, x.shape[1] // 2, 1)
         x = torch.concat(x, -2)
+
+        return x.float()
+
+
+class Encoder(nn.Module):
+    def __init__(
+        self,
+        hop,
+        shape
+    ) -> None:
+        dim = ((4 * hop) // 2) + 1
+
+        kwargs = dict(kernel_size=(1, 1), strides=(1, 1), padding="valid")
+        self.g0 = conv_util(dim               , hop * 2 + 32       , **kwargs)
+        self.g1 = conv_util(hop * 2 + 32      , hop * 2 + 64       , **kwargs)
+        self.g2 = conv_util(hop * 2 + 64      , hop * 2 + 64 + 64  , **kwargs)
+        self.g3 = conv_util(hop * 2 + 64 + 64 , hop * 2 + 128 + 64 , **kwargs)
+        self.g4 = conv_util(hop * 2 + 128 + 64, hop * 2 + 128 + 128, **kwargs)
+
+        self.g = nn.Conv2d(
+            in_channels=hop * 2 + 128 + 128,
+            out_channels=128,
+            **kwargs
+        )
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = einops.rearrange(x, "b c h w -> b w h c")
+        
+        x = self.g0(x)
+        x = self.g1(x)
+        x = self.g2(x)
+        x = self.g3(x)
+        x = self.g4(x)
+
+        x = self.g(x)
+        x = torch.tanh(x)
+
+        x = torch.split(x, x.shape[-2] // 2, -2)
+        x = torch.concat(x, 1)
 
         return x.float()
